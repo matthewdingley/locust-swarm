@@ -163,6 +163,7 @@ def _get_or_create_security_group_from_role(aws_region,
 
     if role_name == DEFAULT_MASTER_ROLE_NAME:
         authorization_tuples.append(('tcp', 8089, 8089, '0.0.0.0/0'))
+        authorization_tuples.append(('tcp', 5557, 5558, '0.0.0.0/0'))
 
     return _get_or_create_security_group(
         aws_region,

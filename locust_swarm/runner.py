@@ -95,12 +95,20 @@ def swarm_up_slaves(args):
     pool.close()
     pool.join()
 
+    
     update_master_security_group(cfg)
 
     # TODO: Hack for now, should check for ssh-ability
-    time.sleep(5)
+    time.sleep(15)
 
-    _update_role_defs(get_slave_reservations(cfg), 'slave')
+    slave_reservations = get_slave_reservations(cfg)
+
+    _create_host_id_mapping(slave_reservations)
+    print slave_reservations
+    print 'Host mapping created'
+    print env.host_id_mapping
+
+    _update_role_defs(slave_reservations, 'slave')
     env.user = cfg.get('fabric', 'user', None)
     env.key_filename = cfg.get('fabric', 'key_filename', None)
     env.parallel = True
@@ -121,27 +129,51 @@ def _bootstrap_master(bootstrap_dir_path):
 
     dir_name = os.path.basename(abs_bootstrap_dir_path)
     run("nohup locust -f /tmp/locust/{0}/locustfile.py \
-        --master >& /dev/null < /dev/null &".format(dir_name), pty=False)
+        --master >~/locust-log.txt 2>&1 < /dev/null &".format(dir_name), pty=False)
 
 
 @roles('slave')
 def _bootstrap_slave(bootstrap_dir_path, master_ip_address):
     abs_bootstrap_dir_path = get_abs_path(bootstrap_dir_path)
+
+    print 'Slave sleeping'
+    time.sleep(60)
     _bootstrap(abs_bootstrap_dir_path)
 
     dir_name = os.path.basename(abs_bootstrap_dir_path)
+    run('echo "{0}" > /tmp/locust/{1}/host_id_mapping.txt'.format(env.host_id_mapping, dir_name))
+
     run("nohup locust -f /tmp/locust/{0}/locustfile.py --slave \
-        --master-host={1} >& /dev/null < /dev/null &".
+        --master-host={1} >~/locust-log.txt 2>&1 < /dev/null &".
         format(dir_name, master_ip_address), pty=False)
 
 
 def _bootstrap(abs_bootstrap_dir_path):
     dir_name = os.path.basename(abs_bootstrap_dir_path)
+    
+    print 'SETTING UP!!!!!!!!!!!!!!!!!!!!!!!!!'
     with show('debug'):
+        print 'Making directory'
         run('mkdir -p /tmp/locust/')
+        print 'Transferring directory'
         put(abs_bootstrap_dir_path, '/tmp/locust/')
+        print 'Chmodding'
         sudo("chmod +x /tmp/locust/{0}/bootstrap.sh".format(dir_name))
+        print 'Calling bootstrap'
         sudo("/tmp/locust/{0}/bootstrap.sh".format(dir_name))
+
+
+def _create_host_id_mapping(reservations):
+    """Creates the mapping from host IP address to the data ID they should run."""
+    host_id_mapping = {}
+    next_id = 0
+    if reservations:
+        for reservation in reservations:
+            for instance in reservation.instances:
+                if instance.private_ip_address:
+                    host_id_mapping[instance.private_ip_address] = str(next_id)
+                    next_id += 1
+    env.host_id_mapping = ','.join(['|'.join(node) for node in host_id_mapping.items()])
 
 
 # TODO: Shouldn't leak these calls through
